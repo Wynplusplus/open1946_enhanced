@@ -136,3 +136,38 @@ time-delta width: none / 1 / 2 / 3 bytes), then `size` body bytes and the traili
 OpenIL2 verifies the packet layer against all 46 shipped tracks: every `traffic` stream
 walks cleanly as a run of packets with no trailing bytes (Intro3b alone is 23 061 packets,
 18 323 guaranteed messages).
+
+## Guaranteed-message semantics
+
+The channel tags every guaranteed message with the meaning in `objIndex`
+(`NetChannel.setGMsg`):
+
+| `objIndex` | meaning | body | trailing `iObjects` |
+|---|---|---|---|
+| `3` | **spawn** (`NetMsgSpawn`) | `u32 finger` (class hash, `Finger.Int` of the class name — `superObj`'s class first, else the object's own), then `u16 idLocal & 0x7fff` | appended by the spawned class's `netReplicate`/`netSpawn` data |
+| `4` | **destroy** (`NetMsgDestroy`) | empty | exactly one ref: the destroyed object |
+| other | a regular message from that object (bit 15 = mirrored on this channel) | class-specific | class-specific |
+
+`iObjects` (`writeNetObj`) are `u16` references to other objects — bit 15 set means
+"object mirrored on this channel" (looked up in the channel's own table), clear means
+"global object id". They travel **after** the body with no count in the framing, but the
+`u8 size` field counts them: `NetMsgOutput.size() = body + 2 × iObjects.len()`, and
+`readNetObj` pops them from the *end* of the message.
+
+Class-finger resolution: `Finger.incInt` hashes a class name char-by-char through the
+256-entry `FPaTable` (rolling `h = (h << 8 \| byte) ^ FPaTable[h >> 24]` twice per char,
+once for the low byte, once for the high byte of the UTF-16 code unit). OpenIL2's
+`il2-formats::finger` module ports the algorithm; the class registry is supplied at
+runtime, nothing is embedded.
+
+Replay state: spawn creates an object (`idLocal` → class), destroy removes it. Verified
+against Intro3b: 23 061 packets, 18 323 guaranteed messages, **all 6 spawns resolve** —
+`NetUser` (the recording pilot), `NetServerParams`, `GameTrack` (the recorder),
+`Mission`, `FlightModelTrack` (per-aircraft FM replay data, one per aircraft, holding
+`readNetObj` → its `Aircraft`), and `Paratrooper`. The guaranteed-message count in the
+packet header bounds the message walk — everything after it is filtered (state) traffic.
+
+Per-class message bodies (what `NetUser.netInput`, `NetServerParams.netInput`, … read)
+are the next layer: spawn bodies already decode for the protocol objects (e.g.
+`NetUser`: `read255` name, `u8` bornPlace, `u8` place (255 = −1), `u16` idChannelFirst,
+`bool` bTrackWriter).

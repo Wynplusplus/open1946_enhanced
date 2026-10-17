@@ -112,7 +112,12 @@ impl<'a> Iterator for GuarantedIter<'a> {
         let body_start = self.pos + 3;
         let body_end = match body_start.checked_add(size) {
             Some(e) if e <= self.data.len() => e,
-            _ => return Some(Err(NtrkError::Truncated)),
+            _ => {
+                // Skip past the bad header so a collect() over a malformed run
+                // terminates instead of looping on the same position forever.
+                self.pos = self.data.len();
+                return Some(Err(NtrkError::Truncated));
+            }
         };
         let data = &self.data[body_start..body_end];
         self.pos = body_end;
