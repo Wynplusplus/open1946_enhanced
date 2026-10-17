@@ -93,4 +93,46 @@ streams are stored verbatim; `states0` and `states1` are single deflate blocks.
 | `NetFilesDir` | optional sub-directory for attached net files (skins, nose art); empty in single-player tracks. |
 
 The `traffic` stream is the recorded network channel. OpenIL2 decodes the container
-here; reading the channel's messages is the network-protocol work tracked in the roadmap.
+and the packet/message framing; interpreting each message type (spawn, state, damage)
+for playback is the network-protocol work still tracked in the roadmap.
+
+## `traffic` packet framing
+
+`NetChannelOutStream.sendPacket` writes one packet per send. All integers big-endian.
+
+```
+u16  deltaTime          ms since the previous packet (0 if the gap exceeded 65535,
+                       which forces a packet with at least 20 bytes)
+u16  payloadLen         the bytes that follow = 3 + filtered + guaranted
+u16  crc16              CRC16 over the bytes from here to the packet end; the writer
+                       first writes 7361 here and then overwrites it with the checksum
+u8   guarantedCount     number of guaranteed messages that follow
+     guarantedCount ×    guaranteed messages
+     …filtered messages  state updates
+```
+
+A guaranteed message (`NetChannel.putMessage`, 3-arg):
+
+```
+u16  objIndex           the sending object's id, or a spawn/destroy tag
+u8   msgSize            body length, not counting the `iObjects` that follow
+msgSize bytes           the message body
+u16 × N                 referenced object ids (`iObjects`) — no count in the framing;
+                       N is known only from the message type
+```
+
+A filtered message (`NetChannel.putMessage`, 5-arg) begins with `u16 objIndex`, then a
+variable-length size/time byte (bit 5 = "size in next byte", the top two bits = the
+time-delta width: none / 1 / 2 / 3 bytes), then `size` body bytes and the trailing
+`iObjects`. The width encodings:
+
+| top 2 bits | size < 32 (bit 5 clear) | size ≥ 32 (bit 5 set) |
+|---|---|---|
+| `00` | size = low 5 bits, no time (1 B) | size in next byte, no time (2 B) |
+| `01` | size = low 5 bits, ±7-bit time (2 B) | size in next byte, 4-bit time (2 B) |
+| `10` | size = low 5 bits, ±15-bit time (3 B) | size in next byte, 12-bit time (3 B) |
+| `11` | size = low 5 bits, ±23-bit time (4 B) | size in next byte, 20-bit time (4 B) |
+
+OpenIL2 verifies the packet layer against all 46 shipped tracks: every `traffic` stream
+walks cleanly as a run of packets with no trailing bytes (Intro3b alone is 23 061 packets,
+18 323 guaranteed messages).
