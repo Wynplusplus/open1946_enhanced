@@ -171,3 +171,46 @@ Per-class message bodies (what `NetUser.netInput`, `NetServerParams.netInput`, �
 are the next layer: spawn bodies already decode for the protocol objects (e.g.
 `NetUser`: `read255` name, `u8` bornPlace, `u8` place (255 = −1), `u16` idChannelFirst,
 `bool` bTrackWriter).
+
+## Class-level message interpretation (verified on Intro3b)
+
+The guaranteed messages resolve into four recorders' worth of data, all decoded in
+`il2-formats::ntrk_interp`:
+
+**Key-record events** (`KeyRecord.NetKeyRecord.post`): `i32` hot-key id followed by
+1–9 `i32` args (`p1..p9`, written while not −1). These are the recorded pilot's key
+presses; the replay drives the player aircraft from them. In Intro3b: 12 333 events
+from the recorder's `NetKeyRecord` object (8/12/16-byte bodies).
+
+**`FlightModelTrack` state** (`netWrite`): `i32 flags`, then per-flag quantized fields.
+Controls are `i8/32` (range −1…1); fuel is `u16·0.5`; prop phi is `u16/625` (0…1.6);
+rpm is `u16/51.18125`; engine blocks start with a `u16` field mask (bit 1/2/4 oil/water
+temps `i8/0.25`, bit 8 phi, bit 16 manifold `i8/40`, bit 32 rpm, bit 64/128/256
+throttle/prop/mix, bits 512/1024 raw magneto/compressor bytes). Bits `0x80000000` adds
+the gear/on-ground `bits` byte, `0x40000000` the `u32` weapon-control bitmap,
+`0x20000000` sensitivity, `0x10000000` gun bullet counts. Bit 14+*n* marks engine *n*'s
+block. All quantization ranges come from the runtime's `_field` tables.
+
+**`NetAircraft` guaranteed messages** (`netGetGMsg`, first body byte = id, bit 7 = ask):
+`0` aircraft-state update (flags/lag/CTL/WCT bytes, 3×f32 position, 3×i16 orientation
+(yaw·32000/180, pitch·32000/90, roll·32000/180), 3×i16 world rotation ×32000/50,
+3×i16 velocity ×32000/400, 3×i16 acceleration ×32000/2000, engine w/phi bytes, optional
+turret u16s, packed control surfaces 2+1 bytes); `2` weapons bit states; `6` hits; `7`
+prop hits; `8` part cuts; `9` explosion; `10` death (damager + assister refs); `11`
+full first state = 3×f32 position, 3×f32 orientation, 3×f32 speed, 44 packed damage
+nibbles (2 per byte), `i64` operate mask, prop-damage byte, weapon bytes, AS state.
+Intro3b: 13 aircraft (3+4+3+3 across four wings), each one first-update; aircraft
+1002/1003/1004 take hits, cuts, explode and die during the intro.
+
+**The streamed mission** (`Mission` case-1, `doSendMission`): the whole `.mis` file
+travels as records — `i32 −1` + length-prefixed name starts a section; `i32 section`
++ length-prefixed key + length-prefixed value adds an entry. The runtime chunks the
+record stream at ~128/250 bytes purely for message size. Intro3b's 149 case-1
+messages reassemble to the full 22-section CoralSea intro (`MAP CoralSea/load.ini`,
+wings `USN_VT_9B01`/`IJN_H_703z01`/`USN_VT_9A02`/`IJN_H_701z02` with classes
+`air.F4F3`/`air.A6M2_21`, fuel, weapons, waypoints, statics, bridges).
+
+What remains for full playback: the aircraft-state update's AS-specific tail
+(`FM.AS.netUpdate` — arms, crews, damage states), the `Mission` remaining case
+messages (3 = ready, 13 = time sync), and the aircraft↔mission linkage (which wing
+each net object flies — from the mission text's `Wing` sections plus spawn order).

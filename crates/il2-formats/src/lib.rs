@@ -9,6 +9,7 @@ pub mod mat;
 pub mod mission;
 pub mod msh;
 pub mod ntrk;
+pub mod ntrk_interp;
 pub mod ntrk_msg;
 pub mod ntrk_traffic;
 pub mod properties;
