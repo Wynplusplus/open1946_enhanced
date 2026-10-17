@@ -293,6 +293,29 @@ pub struct StreamedSection {
     pub entries: Vec<(u32, String, String)>,
 }
 
+impl StreamedSection {
+    /// Renders the sections as `.mis` text (`[Section]` + `key value` lines) that
+    /// [`crate::mission::Mission::parse`] reads. The runtime's block numbers are
+    /// dropped — they order duplicate keys (waypoint lines), which the text keeps
+    /// in stream order anyway.
+    pub fn render_mis_text(sections: &[StreamedSection]) -> String {
+        let mut out = String::new();
+        for s in sections {
+            out.push('[');
+            out.push_str(&s.name);
+            out.push_str("]\n");
+            for (_, k, v) in &s.entries {
+                if v.is_empty() {
+                    out.push_str(&format!("{k}\n"));
+                } else {
+                    out.push_str(&format!("{k} {v}\n"));
+                }
+            }
+        }
+        out
+    }
+}
+
 /// Reassembles the streamed mission from `Mission` case-1 guaranteed messages
 /// and decodes the `doSendMission` record framing. Each message body (after the
 /// 1-byte case id) is a run of records:
@@ -665,5 +688,20 @@ mod tests {
             .map(|(_, _, v)| v.as_str())
             .collect();
         assert_eq!(map, vec!["CoralSea/load.ini"]);
+        // The rendered text parses as a real mission: wings, classes, waypoints.
+        let text = StreamedSection::render_mis_text(&mission);
+        let m = crate::mission::Mission::parse(text.as_bytes());
+        assert_eq!(m.map, "CoralSea/load.ini");
+        assert_eq!(m.wings.len(), 4, "four wings in {:?}", m.wings);
+        assert!(m.wings.iter().any(|w| w.class == "air.F4F3"));
+        assert!(m.wings.iter().any(|w| w.class == "air.A6M2_21"));
+        assert!(m.wings.iter().all(|w| !w.waypoints.is_empty()));
+        eprintln!(
+            "intro3b mission: {} wings, {} stationary, {} buildings, {} objectives",
+            m.wings.len(),
+            m.stationary.len(),
+            m.buildings.len(),
+            m.objectives.len()
+        );
     }
 }
