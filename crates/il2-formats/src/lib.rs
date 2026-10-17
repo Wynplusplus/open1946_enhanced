@@ -7,6 +7,7 @@ pub mod map;
 pub mod mat;
 pub mod mission;
 pub mod msh;
+pub mod ntrk;
 pub mod properties;
 pub mod sectfile;
 pub mod statics;

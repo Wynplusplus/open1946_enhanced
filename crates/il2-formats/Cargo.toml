@@ -8,3 +8,4 @@ description = "Parsers for IL-2 1946 asset formats"
 [dependencies]
 thiserror.workspace = true
 zune-jpeg = "0.4"
+miniz_oxide = "0.8"
